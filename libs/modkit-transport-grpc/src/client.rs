@@ -6,9 +6,11 @@
 //! - Tracing spans around connection establishment
 //!
 //! **Note:** This module is responsible only for transport-level configuration.
-//! For RPC-level retry logic with exponential backoff, see the [`crate::rpc_retry`] module.
+//! For RPC-level retry logic with exponential backoff and jitter, see the [`crate::rpc_retry`] module.
 
 use std::time::Duration;
+
+use rand::Rng as _;
 use tonic::transport::{Channel, Endpoint};
 use tracing::Instrument;
 
@@ -212,13 +214,15 @@ where
     .await
 }
 
-/// Connect to a gRPC service with retry logic using exponential backoff.
+/// Connect to a gRPC service with retry logic using exponential backoff and jitter.
 ///
 /// This function attempts to establish a connection and retries on failure
 /// using the retry parameters from [`GrpcClientConfig`]:
 /// - `max_retries`: Maximum number of retry attempts
-/// - `base_backoff`: Initial backoff duration (multiplied by attempt number)
-/// - `max_backoff`: Maximum backoff duration cap
+/// - `base_backoff`: Initial backoff duration; doubled each attempt (`base * 2^(attempt-1)`)
+/// - `max_backoff`: Maximum backoff duration cap (applied before jitter)
+///
+/// A random jitter of 0–25 % is added after capping to spread out concurrent retries.
 ///
 /// # Example
 ///
@@ -263,7 +267,12 @@ where
                 return Ok(client);
             }
             Err(e) if attempt <= cfg.max_retries => {
-                let backoff = (cfg.base_backoff * attempt).min(cfg.max_backoff);
+                let base = cfg
+                    .base_backoff
+                    .mul_f64(2_f64.powi((attempt - 1) as i32))
+                    .min(cfg.max_backoff);
+                let jitter_factor = rand::rng().random_range(0.0..=0.25);
+                let backoff = base + base.mul_f64(jitter_factor);
                 tracing::warn!(
                     service = cfg.service_name,
                     attempt,
