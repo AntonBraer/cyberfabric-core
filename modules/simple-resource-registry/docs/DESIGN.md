@@ -412,7 +412,7 @@ pub struct PluginCapabilities {
 pub enum CreateOutcome {
     /// Resource was newly created and persisted.
     Created(Resource),
-    /// A resource with this idempotency_key already exists for this tenant; returns its id.
+    /// A resource with this idempotency_key already exists for this tenant (and owner, for per-owner types); returns its id.
     Duplicate(Uuid),
 }
 
@@ -426,7 +426,9 @@ pub trait ResourceStoragePluginClient: Send + Sync {
     /// Persist a new resource and atomically record the idempotency key.
     ///
     /// **Idempotency contract** (all plugins MUST comply):
-    /// - Key scope: `(tenant_id, idempotency_key)` — same key in different tenants is distinct
+    /// - Key scope: `(tenant_id, owner_id, idempotency_key)` — for per-owner types (`is_per_owner_resource=true`),
+    ///   owner_id is set from `SecurityContext.subject_id`; for non-per-owner types, a nil UUID sentinel
+    ///   is used so the constraint reduces to `(tenant_id, idempotency_key)` in effect
     /// - Dedup window: default 24 h from creation (configurable per deployment)
     /// - Atomicity: check + insert resource + insert idempotency record MUST be
     ///   atomic (single DB transaction or equivalent)
@@ -561,9 +563,9 @@ Notes:
 - `id` is optional in the request; if omitted, the system assigns a generated UUID. If provided, it must be a valid UUID
 - `created_at`, `updated_at` are system-generated
 - `201 Created` response includes `Location: /simple-resource-registry/v1/resources/{id}`
-- `idempotency_key` is required; a second POST with the same key within the same tenant returns 409 with the existing resource `id` instead of creating a duplicate
-- Idempotency keys are scoped to `(tenant_id, idempotency_key)` — the same key in different tenants is treated as distinct
-- The plugin atomically records the idempotency key alongside resource creation per the SDK idempotency contract (see §3.2 `create` method): key scope `(tenant_id, idempotency_key)`, default 24 h dedup window, atomic check-and-insert
+- `idempotency_key` is required; a second POST with the same key within the same tenant (and same owner for per-owner types) returns 409 with the existing resource `id` instead of creating a duplicate
+- Idempotency keys are scoped to `(tenant_id, owner_id, idempotency_key)`. For per-owner resource types (`is_per_owner_resource=true`), `owner_id` is set from `SecurityContext.subject_id`; for non-per-owner types, a nil UUID is used so the scope effectively reduces to `(tenant_id, idempotency_key)`. The same key in different tenants is treated as distinct
+- The plugin atomically records the idempotency key alongside resource creation per the SDK idempotency contract (see §3.2 `create` method): key scope `(tenant_id, owner_id, idempotency_key)`, default 24 h dedup window, atomic check-and-insert
 
 #### GET /resources/{id} — Get Resource
 
@@ -1270,7 +1272,7 @@ The following relational schema is the **recommended starting point** for all re
 
 **Primary Key**: `id`
 
-**Indexes** (minimum set for the query patterns in §3.3):
+**Indexes** (baseline set aligned with the primary query patterns in §3.3):
 
 | Index | Columns | Purpose |
 | --- | --- | --- |
@@ -1278,6 +1280,8 @@ The following relational schema is the **recommended starting point** for all re
 | `idx_tenant_type_created` | `(tenant_id, type, created_at)` | OData `$orderby created_at` within a type |
 | `idx_tenant_owner` | `(tenant_id, owner_id)` | User-scoped resource queries |
 | `idx_type_deleted` | `(type, deleted_at)` | Retention purge job |
+
+These indexes cover the leading filter predicates for the primary query patterns. They do not cover all predicate combinations, ordering requirements, or selectivity scenarios. Production deployments may require additional indexes depending on actual query distribution and data volume.
 
 **Benefits**: predictable query performance across plugins; consistent migration paths; easier plugin implementation — new backends start from a known-good schema rather than inventing their own.
 

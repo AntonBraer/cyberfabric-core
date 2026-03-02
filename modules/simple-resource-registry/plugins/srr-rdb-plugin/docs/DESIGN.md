@@ -153,7 +153,7 @@ graph TB
 
 - [ ] `p1` - **ID**: `cpt-cf-srr-rdb-component-idempotency-handler`
 
-  - **Idempotency Handler**: Implements the SDK idempotency contract (see parent DESIGN §3.2 `create` method). Manages the `idempotency_keys` table within create transactions: queries for existing `(tenant_id, idempotency_key)`, and if not found, inserts both the resource row and the idempotency record in the same transaction. If a concurrent create races and causes a unique-key constraint violation on `(tenant_id, idempotency_key)`, the handler MUST catch that error, re-read the existing `idempotency_keys` record (and the associated `resource_id`) from the database, and return `CreateOutcome::Duplicate(existing_resource_id)` — ensuring deterministic behavior across all DB backends. This plugin MUST pass the SDK idempotency conformance test suite.
+  - **Idempotency Handler**: Implements the SDK idempotency contract (see parent DESIGN §3.2 `create` method). Manages the `idempotency_keys` table within create transactions: queries for existing `(tenant_id, owner_id, idempotency_key)`, and if not found, inserts both the resource row and the idempotency record in the same transaction. For per-owner resource types, `owner_id` is set from `SecurityContext.subject_id`; for non-per-owner types, a nil UUID sentinel is used. If a concurrent create races and causes a unique-key constraint violation on `(tenant_id, owner_id, idempotency_key)`, the handler MUST catch that error, re-read the existing `idempotency_keys` record (and the associated `resource_id`) from the database, and return `CreateOutcome::Duplicate(existing_resource_id)` — ensuring deterministic behavior across all DB backends. This plugin MUST pass the SDK idempotency conformance test suite.
 
 ### 3.3 API Contracts
 
@@ -295,19 +295,20 @@ sequenceDiagram
 
 **ID**: `cpt-cf-srr-rdb-dbtable-idempotency-keys`
 
-**Purpose**: Deduplication store for POST create operations. `idempotency_key` is required on every create request; the plugin atomically checks this table and inserts the resource + idempotency record in one transaction. If a matching `(tenant_id, idempotency_key)` row exists and is within the retention window, the plugin returns `CreateOutcome::Duplicate` and the main module returns 409 with the `resource_id` of the previously created resource. If a concurrent create races past the initial check and causes a unique-key constraint violation on `(tenant_id, idempotency_key)`, the plugin MUST catch that constraint error, re-read the existing row from `idempotency_keys` (and look up the associated `resource_id`), and return `CreateOutcome::Duplicate(existing_resource_id)` — making the concurrent-collision behavior identical to the sequential-duplicate case and deterministic across all DB backends.
+**Purpose**: Deduplication store for POST create operations. `idempotency_key` is required on every create request; the plugin atomically checks this table and inserts the resource + idempotency record in one transaction. If a matching `(tenant_id, owner_id, idempotency_key)` row exists and is within the retention window, the plugin returns `CreateOutcome::Duplicate` and the main module returns 409 with the `resource_id` of the previously created resource. For per-owner resource types (`is_per_owner_resource=true`), `owner_id` is set from `SecurityContext.subject_id`; for non-per-owner types, a nil UUID (`00000000-0000-0000-0000-000000000000`) is used so the constraint effectively reduces to `(tenant_id, idempotency_key)`. If a concurrent create races past the initial check and causes a unique-key constraint violation on `(tenant_id, owner_id, idempotency_key)`, the plugin MUST catch that constraint error, re-read the existing row from `idempotency_keys` (and look up the associated `resource_id`), and return `CreateOutcome::Duplicate(existing_resource_id)` — making the concurrent-collision behavior identical to the sequential-duplicate case and deterministic across all DB backends.
 
 **Schema**:
 
 | Column | Type | Nullable | Description |
 | --- | --- | --- | --- |
 | tenant_id | UUID | NOT NULL | Tenant scope (from `SecurityContext.subject_tenant_id`) |
+| owner_id | UUID | NOT NULL | Owner scope — `SecurityContext.subject_id` for per-owner types; nil UUID (`00000000-...`) for non-per-owner types |
 | idempotency_key | VARCHAR(255) | NOT NULL | Caller-supplied deduplication key |
 | resource_id | UUID | NOT NULL | ID of the resource created on the first successful request |
 | created_at | TIMESTAMP WITH TIME ZONE | NOT NULL | When the idempotency record was stored |
 | expires_at | TIMESTAMP WITH TIME ZONE | NOT NULL | When this record is eligible for purge (default: created_at + 24 h) |
 
-**PK**: `(tenant_id, idempotency_key)`
+**PK**: `(tenant_id, owner_id, idempotency_key)`
 
 **Indexes**:
 
@@ -316,6 +317,7 @@ sequenceDiagram
 **Constraints**:
 
 - `tenant_id` is NOT NULL (mandatory tenant scoping — same key in different tenants is distinct)
+- `owner_id` is NOT NULL (per-owner scoping — same key used by different owners is independent for per-owner types; nil UUID for non-per-owner types ensures portable UNIQUE constraint without NULL handling differences across DB backends)
 - `idempotency_key` max length 255 chars
 - `resource_id` references `simple_resources(id)` ON DELETE CASCADE
 - Records **MUST** be purged after `expires_at` by a background job (same Jobs Manager job as retention purge, or a dedicated lightweight task)
