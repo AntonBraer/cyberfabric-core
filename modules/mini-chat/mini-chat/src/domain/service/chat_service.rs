@@ -26,7 +26,7 @@ pub struct ChatService<CR: ChatRepository> {
     model_resolver: Arc<dyn ModelResolver>,
 }
 
-impl<CR: ChatRepository> ChatService<CR> {
+impl<CR: ChatRepository + 'static> ChatService<CR> {
     pub(crate) fn new(
         db: Arc<DbProvider>,
         chat_repo: Arc<CR>,
@@ -72,7 +72,7 @@ impl<CR: ChatRepository> ChatService<CR> {
 
         let model = self
             .model_resolver
-            .resolve_model(tenant_id, &new.model)
+            .resolve_model(tenant_id, new.model)
             .await?;
 
         let now = OffsetDateTime::now_utc();
@@ -190,27 +190,48 @@ impl<CR: ChatRepository> ChatService<CR> {
             validate_title(Some(title.as_str()))?;
         }
 
-        let conn = self.db.conn().map_err(DomainError::from)?;
-
         let scope = self
             .enforcer
             .access_scope(ctx, &resources::CHAT, actions::UPDATE, Some(id))
             .await?;
 
-        let mut chat = self
-            .chat_repo
-            .get(&conn, &scope, id)
-            .await?
-            .ok_or_else(|| DomainError::chat_not_found(id))?;
+        let chat_repo = Arc::clone(&self.chat_repo);
+        let (updated, message_count) = self
+            .db
+            .transaction(|tx| {
+                let scope = scope.clone();
+                Box::pin(async move {
+                    let map = |e: DomainError| modkit_db::DbError::Other(anyhow::Error::new(e));
 
-        // Apply patch
-        if let Some(title_opt) = patch.title {
-            chat.title = title_opt.map(|t| t.trim().to_owned());
-        }
-        chat.updated_at = OffsetDateTime::now_utc();
+                    let mut chat = chat_repo
+                        .get(tx, &scope, id)
+                        .await
+                        .map_err(map)?
+                        .ok_or_else(|| map(DomainError::chat_not_found(id)))?;
 
-        let updated = self.chat_repo.update(&conn, &scope, chat).await?;
-        let message_count = self.chat_repo.count_messages(&conn, &scope, id).await?;
+                    // Apply patch
+                    if let Some(title_opt) = patch.title {
+                        chat.title = title_opt.map(|t| t.trim().to_owned());
+                    }
+                    chat.updated_at = OffsetDateTime::now_utc();
+
+                    let updated = chat_repo.update(tx, &scope, chat).await.map_err(map)?;
+                    let message_count = chat_repo
+                        .count_messages(tx, &scope, id)
+                        .await
+                        .map_err(map)?;
+
+                    Ok((updated, message_count))
+                })
+            })
+            .await
+            .map_err(|e| match e {
+                modkit_db::DbError::Other(err) => match err.downcast::<DomainError>() {
+                    Ok(domain_err) => domain_err,
+                    Err(err) => DomainError::from(modkit_db::DbError::Other(err)),
+                },
+                other => DomainError::from(other),
+            })?;
 
         tracing::debug!("Successfully updated chat title");
         Ok(Self::to_detail(updated, message_count))
