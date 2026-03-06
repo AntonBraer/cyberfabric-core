@@ -56,9 +56,6 @@ pub(crate) async fn stream_message(
         .into_response();
     }
 
-    // TODO P1: AuthZ (PolicyEnforcer::evaluate with send_message action)
-    // TODO P1: Chat existence check via AccessScope
-
     // ── Wire up streaming pipeline ─────────────────────────────────────
     let capacity = svc.stream.channel_capacity();
     let ping_secs = svc.stream.ping_interval_secs();
@@ -86,22 +83,7 @@ pub(crate) async fn stream_message(
         .await
     {
         Ok(handle) => handle,
-        Err(StreamError::Replay { .. }) => {
-            return Problem::new(StatusCode::CONFLICT, "Conflict", "Duplicate request_id")
-                .into_response();
-        }
-        Err(StreamError::Conflict { message, .. }) => {
-            return Problem::new(StatusCode::CONFLICT, "Conflict", &message).into_response();
-        }
-        Err(StreamError::TurnCreationFailed { source }) => {
-            warn!(error = %source, "pre-stream turn creation failed");
-            return Problem::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Internal Error",
-                "Failed to initialize turn",
-            )
-            .into_response();
-        }
+        Err(e) => return stream_error_response(e),
     };
 
     // Monitor provider task for panics
@@ -117,6 +99,34 @@ pub(crate) async fn stream_message(
     Sse::new(relay)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(30)))
         .into_response()
+}
+
+/// Map a [`StreamError`] to an appropriate HTTP error response.
+fn stream_error_response(err: StreamError) -> Response {
+    match err {
+        StreamError::Replay { .. } => {
+            Problem::new(StatusCode::CONFLICT, "Conflict", "Duplicate request_id").into_response()
+        }
+        StreamError::Conflict { message, .. } => {
+            Problem::new(StatusCode::CONFLICT, "Conflict", &message).into_response()
+        }
+        StreamError::ChatNotFound { .. } => {
+            Problem::new(StatusCode::NOT_FOUND, "Not Found", "Chat not found").into_response()
+        }
+        StreamError::AuthorizationFailed { ref source } => {
+            warn!(error = %source, "stream authorization failed");
+            Problem::new(StatusCode::FORBIDDEN, "Forbidden", "Access denied").into_response()
+        }
+        StreamError::TurnCreationFailed { ref source } => {
+            warn!(error = %source, "pre-stream turn creation failed");
+            Problem::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal Error",
+                "Failed to initialize turn",
+            )
+            .into_response()
+        }
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
