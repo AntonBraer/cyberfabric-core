@@ -174,7 +174,7 @@ impl Default for OpenApiConfig {
 /// # Example YAML
 ///
 /// ```yaml
-/// gateway_scope_checks:
+/// route_policies:
 ///   enabled: true
 ///   rules:
 ///     - path: "/admin/**"
@@ -205,6 +205,10 @@ pub struct RoutePoliciesConfig {
 pub struct RoutePolicyRule {
     /// Path pattern to match. Supports glob syntax (`*` = one segment, `**` = any depth).
     pub path: String,
+    /// HTTP method to match (GET, POST, PUT, PATCH, DELETE, etc.).
+    /// If not specified, matches any method.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
     /// Required scopes for this route. Request passes if token has ANY of these scopes.
     /// Must not be empty.
     pub required_scopes: Vec<String>,

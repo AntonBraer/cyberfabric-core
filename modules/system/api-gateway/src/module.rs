@@ -259,6 +259,14 @@ impl ApiGateway {
 
         // 11) Route Policy Enforcement (runs after auth, checks token_scopes against route requirements)
         if config.route_policies.enabled {
+            // Reject invalid combination: route_policies requires authentication to work
+            if config.auth_disabled {
+                return Err(anyhow::anyhow!(
+                    "Invalid configuration: route_policies.enabled=true requires authentication. \
+                     Set auth_disabled=false or disable route_policies."
+                ));
+            }
+
             let scope_rules = middleware::scope_enforcement::ScopeEnforcementRules::from_config(
                 &config.route_policies,
             )?;
