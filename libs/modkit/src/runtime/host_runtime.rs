@@ -131,6 +131,17 @@ impl HostRuntime {
     ///
     /// This is the maximum time the runtime will wait for modules to stop gracefully
     /// before sending the hard-stop signal (cancelling the deadline token).
+    ///
+    /// # Relationship with `WithLifecycle::stop_timeout`
+    ///
+    /// When using `WithLifecycle`, its `stop_timeout` (default 30s) races against this
+    /// `shutdown_deadline` (also default 30s). To ensure deterministic behavior:
+    ///
+    /// - `WithLifecycle::stop_timeout` should be **less than** `shutdown_deadline`
+    /// - This allows the lifecycle's internal timeout to trigger first for graceful cleanup
+    /// - The runtime's `deadline_token` then acts as a hard backstop
+    ///
+    /// Example: `stop_timeout = 25s`, `shutdown_deadline = 30s`
     #[must_use]
     pub fn with_shutdown_deadline(mut self, deadline: std::time::Duration) -> Self {
         self.shutdown_deadline = deadline;
@@ -578,14 +589,17 @@ impl HostRuntime {
     ///
     /// # Two-Phase Shutdown Contract
     ///
-    /// This phase implements a proper two-phase shutdown:
+    /// This phase implements a proper two-phase shutdown for **each module**:
     ///
     /// 1. **Graceful stop request**: Each module's `stop(deadline_token)` is called with a
     ///    *fresh* cancellation token (not the already-cancelled root token). Modules should
     ///    interpret this as "please stop gracefully".
     ///
-    /// 2. **Hard-stop deadline**: After `shutdown_deadline` expires, the `deadline_token` is
-    ///    cancelled. Modules should interpret this as "abort immediately".
+    /// 2. **Hard-stop deadline**: After `shutdown_deadline` expires **for that module**,
+    ///    its `deadline_token` is cancelled. Modules should interpret this as "abort immediately".
+    ///
+    /// Each module gets its own independent deadline — if module A takes 25s to stop,
+    /// module B still gets the full `shutdown_deadline` for its graceful shutdown.
     ///
     /// This allows modules to implement real graceful shutdown:
     /// - Request cooperative shutdown of child tasks
@@ -598,32 +612,34 @@ impl HostRuntime {
     async fn run_stop_phase(&self) -> Result<(), RegistryError> {
         tracing::info!("Phase: stop");
 
-        // Create a fresh deadline token for the stop phase.
-        // This token is NOT already cancelled (unlike self.cancel which triggered the stop phase).
-        // Modules can use this to implement two-phase shutdown:
-        // - Start graceful shutdown immediately
-        // - Switch to hard-abort when deadline_token is cancelled
-        let deadline_token = CancellationToken::new();
         let deadline = self.shutdown_deadline;
 
-        // Spawn a task to cancel the deadline token after the shutdown deadline
-        let deadline_token_for_timeout = deadline_token.clone();
-        let deadline_task = tokio::spawn(async move {
-            tokio::time::sleep(deadline).await;
-            tracing::warn!(
-                deadline_secs = deadline.as_secs(),
-                "Shutdown deadline reached, sending hard-stop signal"
-            );
-            deadline_token_for_timeout.cancel();
-        });
-
-        // Stop all modules in reverse order with the fresh deadline token
+        // Stop all modules in reverse order, each with its own independent deadline
         for e in self.registry.modules().iter().rev() {
-            Self::stop_one_module(e, deadline_token.clone()).await;
-        }
+            // Create a fresh deadline token for THIS module
+            // Each module gets the full shutdown_deadline independently
+            let deadline_token = CancellationToken::new();
+            let deadline_token_for_timeout = deadline_token.clone();
 
-        // Cancel the deadline task if all modules stopped before the deadline
-        deadline_task.abort();
+            // Spawn a task to cancel this module's deadline token after shutdown_deadline
+            let module_name = e.name;
+            let deadline_task = tokio::spawn(async move {
+                tokio::time::sleep(deadline).await;
+                tracing::warn!(
+                    module = module_name,
+                    deadline_secs = deadline.as_secs(),
+                    "Module shutdown deadline reached, sending hard-stop signal"
+                );
+                deadline_token_for_timeout.cancel();
+            });
+
+            // Stop this module with its own deadline token
+            Self::stop_one_module(e, deadline_token).await;
+
+            // Cancel the deadline task and await it to ensure full cleanup
+            deadline_task.abort();
+            drop(deadline_task.await);
+        }
 
         Ok(())
     }
@@ -1136,6 +1152,7 @@ mod tests {
         use std::sync::atomic::AtomicBool;
 
         struct TokenCheckModule {
+            stop_was_called: Arc<AtomicBool>,
             token_was_cancelled_on_entry: Arc<AtomicBool>,
         }
 
@@ -1152,6 +1169,8 @@ mod tests {
                 Ok(())
             }
             async fn stop(&self, deadline_token: CancellationToken) -> anyhow::Result<()> {
+                // Record that stop() was called
+                self.stop_was_called.store(true, Ordering::SeqCst);
                 // Record whether the token was already cancelled when stop() was called
                 self.token_was_cancelled_on_entry
                     .store(deadline_token.is_cancelled(), Ordering::SeqCst);
@@ -1159,8 +1178,10 @@ mod tests {
             }
         }
 
+        let stop_was_called = Arc::new(AtomicBool::new(false));
         let token_was_cancelled = Arc::new(AtomicBool::new(true)); // Default to true to detect if not set
         let module = Arc::new(TokenCheckModule {
+            stop_was_called: stop_was_called.clone(),
             token_was_cancelled_on_entry: token_was_cancelled.clone(),
         });
 
@@ -1185,6 +1206,12 @@ mod tests {
 
         // Run stop phase - the deadline token should NOT be cancelled
         runtime.run_stop_phase().await.unwrap();
+
+        // First, verify stop() was actually called (guards against silent registration failures)
+        assert!(
+            stop_was_called.load(Ordering::SeqCst),
+            "stop() was never called - module may not have been registered correctly"
+        );
 
         // The token should NOT have been cancelled when stop() was called
         // This is the key fix: modules get a fresh token, not the already-cancelled root token

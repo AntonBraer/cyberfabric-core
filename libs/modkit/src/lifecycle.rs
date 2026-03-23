@@ -533,6 +533,21 @@ impl<T: Runnable> WithLifecycle<T> {
         }
     }
 
+    /// Set a custom stop timeout for graceful lifecycle shutdown.
+    ///
+    /// This is how long `Lifecycle::stop()` will wait for the task to finish
+    /// before aborting it.
+    ///
+    /// # Relationship with `HostRuntime::shutdown_deadline`
+    ///
+    /// When running under `HostRuntime`, this `stop_timeout` races against the
+    /// runtime's `shutdown_deadline` (both default to 30s). To ensure deterministic behavior:
+    ///
+    /// - `stop_timeout` should be **less than** `shutdown_deadline`
+    /// - This allows the lifecycle's internal timeout to trigger first for graceful cleanup
+    /// - The runtime's `deadline_token` then acts as a hard backstop
+    ///
+    /// Example: `stop_timeout = 25s`, `shutdown_deadline = 30s`
     pub fn with_stop_timeout(mut self, d: Duration) -> Self {
         self.stop_timeout = d;
         self
