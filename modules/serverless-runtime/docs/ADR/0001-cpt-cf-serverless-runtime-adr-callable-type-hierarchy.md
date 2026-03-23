@@ -23,6 +23,25 @@ date: 2026-03-23
 -->
 # ADR — Function | Workflow as Sibling Peer Base Types
 
+
+<!-- toc -->
+
+- [Context and Problem Statement](#context-and-problem-statement)
+- [Decision Drivers](#decision-drivers)
+- [Considered Options](#considered-options)
+- [Decision Outcome](#decision-outcome)
+  - [Consequences](#consequences)
+  - [Confirmation](#confirmation)
+- [Pros and Cons of the Options](#pros-and-cons-of-the-options)
+  - [Option D: Function | Workflow (sibling peer types) — **chosen**](#option-d-function--workflow-sibling-peer-types--chosen)
+  - [Option A: Function → Workflow (function as base type) — rejected](#option-a-function--workflow-function-as-base-type--rejected)
+  - [Option B: Entrypoint → Function | Workflow (abstract entrypoint base) — rejected](#option-b-entrypoint--function--workflow-abstract-entrypoint-base--rejected)
+  - [Option C: Callable → Function | Workflow (abstract callable base) — rejected](#option-c-callable--function--workflow-abstract-callable-base--rejected)
+- [More Information](#more-information)
+- [Traceability](#traceability)
+
+<!-- /toc -->
+
 **ID**: `cpt-cf-serverless-runtime-adr-callable-type-hierarchy`
 
 ## Context and Problem Statement
@@ -165,6 +184,6 @@ The execution mode (sync vs async) and invocation role (direct target vs helper 
 
 This decision directly addresses the following requirements and design elements:
 
-* `cpt-cf-serverless-runtime-design-domain-model` — Defines the GTS type hierarchy for Function and Workflow entities
-* `cpt-cf-serverless-runtime-fr-003` — Function definition and registration uses `gts.x.core.sless.function.v1~` as the base callable type
-* `cpt-cf-serverless-runtime-fr-004` — Workflow definition uses `gts.x.core.sless.workflow.v1~` as a sibling peer base type; workflow_traits are defined on this type exclusively
+* [DESIGN.md — GTS Type Hierarchy](../DESIGN.md) — defines the GTS type hierarchy for Function and Workflow entities
+* Function definition and registration uses `gts.x.core.sless.function.v1~` as the base callable type
+* Workflow definition uses `gts.x.core.sless.workflow.v1~` as a sibling peer base type; `workflow_traits` are defined on this type exclusively

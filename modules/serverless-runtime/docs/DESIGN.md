@@ -1,5 +1,34 @@
 # Technical Design — Serverless Runtime
 
+
+<!-- toc -->
+
+- [1. Architecture Overview](#1-architecture-overview)
+  - [1.1 Architectural Vision](#11-architectural-vision)
+  - [1.2 Architecture Drivers](#12-architecture-drivers)
+  - [1.3 Architecture Layers](#13-architecture-layers)
+- [2. Principles & Constraints](#2-principles--constraints)
+  - [2.1 Design Principles](#21-design-principles)
+  - [2.2 Constraints](#22-constraints)
+- [3. Technical Architecture](#3-technical-architecture)
+  - [3.1 Domain Model](#31-domain-model)
+  - [3.1.1 Complete Entity Examples](#311-complete-entity-examples)
+  - [3.2 Component Model](#32-component-model)
+  - [3.3 API Contracts](#33-api-contracts)
+  - [3.4 Internal Dependencies](#34-internal-dependencies)
+  - [3.5 External Dependencies](#35-external-dependencies)
+  - [3.6 Interactions & Sequences](#36-interactions--sequences)
+  - [3.7 Database schemas & tables](#37-database-schemas--tables)
+- [4. Additional Context](#4-additional-context)
+  - [Security Considerations](#security-considerations)
+  - [Audit Events](#audit-events)
+  - [Comparison with Similar Solutions](#comparison-with-similar-solutions)
+  - [Implementation Considerations](#implementation-considerations)
+  - [Non-Applicable Domains](#non-applicable-domains)
+- [5. Traceability](#5-traceability)
+
+<!-- /toc -->
+
 <!--
 =============================================================================
 TECHNICAL DESIGN DOCUMENT
@@ -969,7 +998,7 @@ The common Serverless Runtime provides reusable mechanisms such as an HTTP clien
 
 ##### Functions vs. Workflows
 
-The function/workflow distinction is **structural**, not modal: a workflow is a callable registered under the `gts.x.core.sless.workflow.v1~` base type and carries `workflow_traits` (compensation, checkpointing, event waiting). Function and Workflow are sibling GTS base types — Workflow is not derived from Function. Execution mode (sync vs async) is orthogonal to type — both functions and workflows can be invoked in either mode. See [ADR — Function as Base Callable Type](ADR/0001-cpt-cf-serverless-runtime-adr-callable-type-hierarchy.md) for the full rationale.
+The function/workflow distinction is **structural**, not modal: a workflow is a callable registered under the `gts.x.core.sless.workflow.v1~` base type and carries `workflow_traits` (compensation, checkpointing, event waiting). Function and Workflow are sibling GTS base types — Workflow is not derived from Function. Execution mode (sync vs async) is orthogonal to type — both functions and workflows can be invoked in either mode. See [ADR — Function | Workflow as Sibling Peer Base Types](ADR/0001-cpt-cf-serverless-runtime-adr-callable-type-hierarchy.md) for the full rationale.
 
 Functions and workflows share the same definition schema and the same implementation language constructs. The distinguishing characteristics of a workflow are:
 
@@ -1443,7 +1472,7 @@ A simple stateless function that fetches a URL and returns the HTTP status and b
     "id": "t_acme",
     "tenant_id": "t_acme"
   },
-  "lifecycle_status": "active",
+  "status": "active",
   "tags": ["http", "utility"],
   "schema": {
     "params": {
@@ -1542,7 +1571,7 @@ A multi-step durable workflow that reserves inventory, charges payment, and crea
     "id": "t_acme",
     "tenant_id": "t_acme"
   },
-  "lifecycle_status": "active",
+  "status": "active",
   "tags": ["orders", "fulfillment", "saga"],
   "schema": {
     "params": {
@@ -1608,7 +1637,7 @@ A multi-step durable workflow that reserves inventory, charges payment, and crea
       "backoff_multiplier": 2.0,
       "non_retryable_errors": []
     },
-    "workflow_traits": {
+    "workflow": {
       "async_only": true,
       "checkpointing": {
         "strategy": "automatic"
