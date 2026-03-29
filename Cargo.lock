@@ -1791,6 +1791,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "inventory",
+ "mime",
  "pingora-core",
  "pingora-http",
  "pingora-load-balancing",
