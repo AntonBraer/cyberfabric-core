@@ -84,7 +84,7 @@ pub struct OpenApiRegistryImpl {
     /// Store operation specs keyed by "METHOD:path"
     pub operation_specs: DashMap<String, operation_builder::OperationSpec>,
     /// Store schema components using arc-swap for lock-free reads
-    /// BTreeMap ensures deterministic ordering of schemas in the OpenAPI document
+    /// `BTreeMap` ensures deterministic ordering of schemas in the `OpenAPI` document
     pub components_registry: ArcSwap<BTreeMap<String, RefOr<Schema>>>,
 }
 
