@@ -89,7 +89,7 @@ The Serverless Runtime domain model defines a pluggable adapter architecture (`c
 
 Chosen option: **"Option A: Temporal"** as the durable execution backend, with a **custom workflow engine layer** built on top using the Temporal Rust SDK.
 
-**Why Temporal**: It is the only option that satisfies all decision drivers — particularly the combination of self-hostable deployment, Rust SDK availability (`temporal-sdk-core` is written in Rust and usable from Rust; standalone `temporalio-sdk` crate is prerelease), proven scale at production users, long-running workflow support (days to years), saga/compensation patterns, and built-in schedule API.
+**Why Temporal**: It is the only option that satisfies all decision drivers — particularly the combination of self-hostable deployment, Rust SDK availability (`temporal-sdk-core` is written in Rust and usable from Rust; standalone `temporalio-sdk` crate is prerelease as of 2026-03-30 — see [sdk-core](https://github.com/temporalio/sdk-core)), proven scale at production users, long-running workflow support (days to years), saga/compensation patterns, and built-in schedule API.
 
 **Why a custom engine layer on top**: Temporal provides durable execution primitives (checkpointing, retry, state persistence, worker management) but does not natively interpret the Serverless Workflow Specification DSL ([ADR-0002](0002-cpt-cf-serverless-runtime-adr-workflow-dsl.md)). A custom engine layer is required to bridge the gap between declarative workflow definitions and Temporal's workflow-as-code model — handling DSL parsing, task execution mapping, expression evaluation, flow control, and data transformation.
 
@@ -119,7 +119,7 @@ Temporal is an open-source durable execution platform that provides workflow orc
 
 | | Aspect | Note |
 |---|--------|------|
-| Good | Rust SDK available (`temporal-sdk-core`) | Written in Rust and usable from Rust; primarily serves as the polyglot core (other language SDKs use it via FFI); standalone `temporalio-sdk` crate is prerelease |
+| Good | Rust SDK available (`temporal-sdk-core`) | Written in Rust and usable from Rust; primarily serves as the polyglot core (other language SDKs use it via FFI); standalone `temporalio-sdk` crate is prerelease (as of 2026-03-30 — see [sdk-core](https://github.com/temporalio/sdk-core)) |
 | Good | Built-in durable execution | Automatic checkpointing, event sourcing, and deterministic replay — workflow state survives infrastructure failures without custom persistence logic |
 | Good | Proven at scale | Production deployments handling high workflow volumes at multiple large-scale users |
 | Good | Long-running workflow support | Workflows can run for days to years with timer-based and event-driven continuation; suspension periods of 30+ days are natively supported |
@@ -134,7 +134,7 @@ Temporal is an open-source durable execution platform that provides workflow orc
 | Bad | Operational complexity | Temporal Server adds infrastructure overhead (server cluster, persistence backend, monitoring) |
 | Bad | Deterministic execution constraints | Engine implementation code must follow Temporal's deterministic replay rules (no side effects in workflow code); this affects engine developers, not workflow authors who write declarative YAML |
 | Bad | Custom engine layer required | Temporal does not natively interpret the Serverless Workflow Specification; a custom DSL interpreter layer adds development and maintenance complexity |
-| Bad | Rust SDK maturity | `temporal-sdk-core` is primarily the polyglot foundation; standalone Rust SDK (`temporalio-sdk`) is prerelease — API stability risk |
+| Bad | Rust SDK maturity | `temporal-sdk-core` is primarily the polyglot foundation; standalone Rust SDK (`temporalio-sdk`) is prerelease (as of 2026-03-30 — see [sdk-core](https://github.com/temporalio/sdk-core)) — API stability risk |
 
 ### Option B: Cadence
 
@@ -210,13 +210,13 @@ Apache Airflow provides DAG-based workflow scheduling and orchestration, primari
 This decision should be revisited if any of the following occur:
 
 * Temporal Rust SDK (`temporal-sdk-core`) is deprecated, archived, or receives no releases for >6 months
-* Temporal Server licensing changes from MIT to a restrictive or commercial-only license
+* Temporal Server licensing changes from MIT (see [LICENSE](https://github.com/temporalio/temporal/blob/main/LICENSE)) to a restrictive or commercial-only license
 * Restate or another engine achieves a production-quality Rust SDK with built-in schedule API and long-running workflow support
 * Operational cost of Temporal Server infrastructure becomes disproportionate to platform infrastructure cost
 
 ### Security Note
 
-Temporal Server adds a network-accessible infrastructure component (gRPC Frontend) that requires security hardening. Temporal supports mTLS and custom authorization plugins; by default no authentication is enforced. Platform security context (`tenant_id`, `user_id`) must be propagated to Temporal via workflow metadata to maintain tenant isolation at the engine level.
+Temporal Server adds a network-accessible infrastructure component (gRPC Frontend) that requires security hardening. Temporal supports mTLS and custom authorization plugins; in self-hosted deployments, no authentication is enforced by default. Platform security context (`tenant_id`, `user_id`) must be propagated to Temporal via workflow metadata to maintain tenant isolation at the engine level.
 
 ## Traceability
 
