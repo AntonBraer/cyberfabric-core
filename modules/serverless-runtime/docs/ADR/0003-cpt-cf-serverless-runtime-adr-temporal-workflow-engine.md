@@ -52,7 +52,7 @@ STANDARDS ALIGNMENT:
 **ID**: `cpt-cf-serverless-runtime-adr-temporal-workflow-engine`
 ## Context and Problem Statement
 
-The Serverless Runtime domain model defines a pluggable adapter architecture (`cpt-cf-serverless-runtime-principle-pluggable-adapters`) where execution adapters implement the abstract `ServerlessRuntime` trait. The platform needs a workflow engine that:
+The Serverless Runtime domain model defines a pluggable adapter architecture (`cpt-cf-serverless-runtime-principle-pluggable-adapters`) where execution adapters implement the abstract `ServerlessRuntime` trait. This ADR covers the **Temporal adapter** — one of multiple possible adapter implementations (others include Starlark, WASM, cloud FaaS). The Temporal adapter needs a workflow engine that:
 
 1. **Interprets workflow definitions** authored in the Serverless Workflow Specification DSL ([ADR-0002](0002-cpt-cf-serverless-runtime-adr-workflow-dsl.md)) — parsing task definitions, evaluating expressions, managing data flow between steps, and controlling execution flow (branching, loops, error handling).
 2. **Executes workflows durably** — persisting state across service restarts, providing automatic checkpointing, retry, compensation, and long-running workflow support lasting days to months.
@@ -134,6 +134,7 @@ Temporal is an open-source durable execution platform that provides workflow orc
 | Bad | Operational complexity | Temporal Server adds infrastructure overhead (server cluster, persistence backend, monitoring) |
 | Bad | Deterministic execution constraints | Engine implementation code must follow Temporal's deterministic replay rules (no side effects in workflow code); this affects engine developers, not workflow authors who write declarative YAML |
 | Bad | Custom engine layer required | Temporal does not natively interpret the Serverless Workflow Specification; a custom DSL interpreter layer adds development and maintenance complexity |
+| Bad | Multi-process architecture | Temporal Server runs as a separate process; all workflow ↔ activity communication requires gRPC serialization/deserialization and IPC, adding latency overhead compared to in-process execution engines |
 | Bad | Rust SDK maturity | `temporal-sdk-core` is primarily the polyglot foundation; standalone Rust SDK (`temporalio-sdk`) is prerelease (as of 2026-03-30 — see [sdk-core](https://github.com/temporalio/sdk-core)) — API stability risk |
 
 ### Option B: Cadence

@@ -100,6 +100,7 @@ The Serverless Workflow Specification is a CNCF project that defines a vendor-ne
 | Good | Comprehensive control-flow constructs | Supports all required patterns: sequential (Do), conditional (Switch), parallel (Fork), error handling (Try), sub-workflows, loops (For), event-driven (Listen/Emit) |
 | Good | Declarative JSON/YAML format | Suitable for validation at submission time and programmatic generation |
 | Good | SDKs in major languages | SDKs available for Go, Java, .NET, Python, Rust, TypeScript; project is CNCF-backed with growing adoption |
+| Neutral | Declarative verbosity | YAML/JSON definitions are more verbose than code-based alternatives; this is the trade-off for machine-readable validation and tooling support |
 | Bad | Relatively new standard (v1.0.0, Jan 2025) | Ecosystem is still growing; fewer production deployments compared to established alternatives |
 
 ### Option B: Amazon States Language (ASL)
